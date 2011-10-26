@@ -1,0 +1,400 @@
+<?php
+
+/**
+ * ProcessWire Discussions module
+ *
+ * Provides simple discussion board using native ProcessWire pages
+ *
+ * Basic Example usage:
+ * 
+ * add two templates files, discussions-forum.php and discussions-topic.php.
+ * Then add $modules->get("Discussions")->renderForum() and
+ * $modules->get("Discussions")->renderTopic() respectively to those template files.
+ *
+ *
+ * ProcessWire 2.x 
+ * Copyright (C) 2011 by Ryan Cramer 
+ * Licensed under GNU/GPL v2, see LICENSE.TXT
+ * 
+ * http://www.processwire.com
+ * http://www.ryancramer.com
+ *
+ */
+
+
+
+/**
+ * ProcessWire module that provides pagination for PageArray types
+ *
+ */
+class Discussions extends WireData implements Module {
+
+	public static function getModuleInfo() {
+		return array(
+			'title' => 'Discussions', 
+			'summary' => 'Provides simple discussions board', 
+			'version' => 100, 
+			'permanent' => false, 
+			'singular' => true, 
+			'autoload' => true, 
+			);
+	}
+
+	public function init() {
+		
+		
+		
+		// Discussions requires logged in users (at least for now)
+		if ($this->user->isGuest()) return false;
+
+		
+			
+	}
+	
+	public function ready() {
+		
+		$input = wire('input');
+		$page = wire('page');
+		
+		// Only templates where we could have discussions input are discussions-forum & -topic
+		if (!($page->template->name == "discussions-topic" || $page->template->name == "discussions-forum")) return false;
+		
+		
+		// If there is no post params, no need to go further
+		if(count($input->post) === 0) return false;
+		
+		// Process new post
+		$this->processInput();
+	}
+	
+	public function ___render() {
+		$page = wire('page');
+		
+		if ($page->template->name == "discussions-forum") {
+			return $this->renderForum();
+		}
+		
+		if ($page->template->name == "discussions-topic") {
+			return $this->renderTopic();
+		}
+	}
+	
+	public function ___renderForum() {
+		
+		$page = wire('page');
+		$out = '';
+		
+		if($page->numChildren) {
+			
+			$limit = $page->discussions_pagination;
+			$results = $page->children("sort=-modified, limit=$limit");
+			$pagination = $results->renderPager();
+			$out .= $pagination;
+
+			$out .= "<ul class='topics'>";
+		
+			foreach($results as $child) {
+				$repliesCount = $child->children()->count();
+				$lastReply = $child->children()->last();
+				$pagePrefix = '';
+				$pageNum = $this->_countLastPage($child);
+				if ($pageNum > 0) {
+					$pagePrefix = wire('config')->pageNumUrlPrefix . $pageNum;
+				}
+				$out .= "<li><p><a href='{$child->url}{$pagePrefix}'>{$child->title}</a> (Started by <strong>{$child->discussions_author->name}</strong>.)";
+				if ($repliesCount > 0) {
+					$out .= "<span class='discussions-lastreply'>$repliesCount replies, last by {$lastReply->discussions_author->name}</span>";
+				}
+				"</p></li>"; 
+			}
+		
+			$out .= "</ul>";
+			
+			$out .= $pagination;
+		}
+		
+		$out .= $this->renderForm("topic");
+		
+		return $out;
+	}
+	
+	public function ___renderTopic($options = array()) {
+		
+		$page = wire('page');
+		$out = "<div id='discussions'>";
+		$limit = $page->parent->discussions_pagination;
+		$results = $page->children("template=discussions-reply, sort=created, limit=$limit");
+		
+		
+		
+		$pagination = $results->renderPager();
+		$out .= $pagination;
+		
+		// If we are on a first page, add actual start message in
+		if ($results->getStart() === 0) $out .= $this->renderReply($page);
+		
+		foreach($results as $reply) {
+			$out .= $this->renderReply($reply);
+		}
+		
+		$out .= $pagination;
+		
+		$out .= $this->renderForm("reply");
+		$out .= "</div>";
+		
+		return $out;
+	}
+	
+	public function ___renderReply($reply) {
+		
+		$out  = "\n\n<div class='discussions-reply'>";
+		$out .= "\n\t<div class='discussions-information'><span class='discussions-author'>{$reply->discussions_author->name}</span><span class='discussions-datetime'>".date("d.m.Y H:i", $reply->created)."</span></div>";
+		$out .= "\n\t<div class='discussions-message'>$reply->discussions_message</div>";
+		$out .= "\n</div>";
+		
+		return $out;
+	}
+	
+	public function ___renderForm($type) {
+		if ($this->user->isGuest()) {
+			if ($type == "topic") return "<p>You have to log in to start new topics.</p>";
+			if ($type == "reply") return "<p>You have to log in to reply.</p>";
+		}
+		
+		$out = '';
+		
+		$user = wire('user');
+		$sanitizer = wire('sanitizer');
+		$get = wire('input')->get;
+		$session = wire('session');
+		
+		$discussions_title = '';
+		$discussions_message = '';
+		
+		$out .= "<form action='./' method='post'>";
+		if ($type == "topic") {
+			if ($get->empty_title) {
+				$discussions_title = $sanitizer->text($session->discussions_title);
+				$discussions_title = filter_var($discussions_title,FILTER_SANITIZE_FULL_SPECIAL_CHARS);
+			}
+			$out .= "<label for='discussions_title'>Subject</label><input type='text' id='discussions_title' name='discussions_title' value='$discussions_title' />";
+		}
+		
+		$out .= "<div>{$user->name}</div>";
+		if ($get->empty_message) {
+			$discussions_message = $sanitizer->textarea($session->discussions_message);
+			$discussions_message = filter_var($discussions_message,FILTER_SANITIZE_FULL_SPECIAL_CHARS);
+		}
+		$out .= "<label for='discussions_message'>Write message:</label><textarea cols='50' rows='8' name='discussions_message'>$discussions_message</textarea>";
+		$out .= "<br><input type='submit' name='discussions_submit' />";
+		$out .= "</form>";
+		
+		return $out;
+	}
+	
+	public function ___processInput() {
+		
+		$page = wire('page');
+	
+		$post = wire('input')->post;
+		$sanitizer = wire('sanitizer');
+		$user = wire('user');
+		$session = wire('session');
+		
+		$newPost = new Page;
+		$newPost->parent = $page;
+		
+		// If message was empty, we redirect and add possible title as get parameter
+		if (!$post->discussions_message) {
+			$session->discussions_title = $post->discussions_title;
+			$session->redirect("./?empty_title=1");
+		}
+		
+		
+		// If template is -forum, then we are creating a new topic, then it is a new topic rather than just a reply
+		if ($page->template->name == "discussions-forum") {
+			
+			// If title was missing, redirect and add message
+			if (!$post->discussions_title) {
+				$session->discussions_message = $post->discussions_message;
+				$session->redirect("./?empty_message=1");
+			}
+			
+			$newPost->template = wire('templates')->get('discussions-topic');
+			$newPost->title = $sanitizer->text($post->discussions_title);
+			$newPost->name = $sanitizer->pageName($post->discussions_title, true);
+		} else {
+			$newPost->template = wire('templates')->get('discussions-reply');
+			$newPost->title = $sanitizer->text($post->discussions_message);
+			$newPost->name = md5(time() . $user->name);
+		}
+		
+		$newPost->discussions_message = $sanitizer->textarea($post->discussions_message);
+		$newPost->discussions_author = $user;
+		$newPost = $newPost->save();
+		
+		// We save the parent page just to make it last modified
+		$page->setOutputFormatting(false);
+		$page->save();
+		
+		// After saving new reply we redirect to prevent double posts
+		if ($post->discussions_title) {
+			$session->redirect("./" . $sanitizer->pageName($post->discussions_title, true));
+		} else {
+			// Redirect to last page there is
+			$pageNum = $this->_countLastPage($page);
+			if ($pageNum > 0) $session->redirect("./" . wire('config')->pageNumUrlPrefix . $pageNum);
+			else $session->redirect("./");
+		}
+	}
+	
+	/*
+	 * This just counts if there is active pagination - information used to link or redirect to latest page of discussion topics
+	 *
+	**/
+	
+	private function _countLastPage($topic) {
+		
+		$replies = $topic->children()->count();
+		$pagination = $topic->parent()->discussions_pagination;
+
+		if ($replies > $pagination && $pagination > 0) {
+				$pageNum = (int)(($replies - 1) / $pagination);
+				$pageNum++;
+				return $pageNum;
+		} else {
+			return 0;
+		}
+	}
+
+
+	public function ___install() {
+		
+		// Check that there are no required templates & fields already...
+		$this->_checkInstall();
+		
+		$field_author = new Field(); 
+		$field_author->type = $this->modules->get("FieldtypePage"); 
+		$field_author->name = 'discussions_author'; 
+		$field_author->label = 'User';
+		$field_author->derefAsPage = 1;
+		$field_author->parent_id = $this->user->parent->id;
+		$field_author->labelFieldName = 'name';
+		$field_author->inputfield = 'InputfieldSelect';
+		$field_author->required = 1;
+		$field_author->save();
+		
+		$field_message = new Field();
+		$field_message->type = $this->modules->get("FieldtypeTextarea");
+		$field_message->name = 'discussions_message';
+		$field_message->label = 'Message';
+		$field_message->textformatters = array('TextformatterMarkdownExtra');
+		$field_message->save();
+		
+		$field_pagination = new Field();
+		$field_pagination->type = $this->modules->get("FieldtypeInteger");
+		$field_pagination->name = 'discussions_pagination';
+		$field_pagination->label = 'Number of replies or topics shown at the time';
+		$field_pagination->required = 1;
+		$field_pagination->save();
+		
+		$fieldgroup_forum = new Fieldgroup(); 
+		$fieldgroup_forum->name = 'discussions-forum';
+		$fieldgroup_forum->add($this->fields->get('title')); 
+		$fieldgroup_forum->add($field_pagination); // language_files
+		$fieldgroup_forum->save();
+		
+		$fieldgroup_topic = new Fieldgroup(); 
+		$fieldgroup_topic->name = 'discussions-topic';
+		$fieldgroup_topic->add($this->fields->get('title')); 
+		$fieldgroup_topic->add($field_message);
+		$fieldgroup_topic->add($field_author);
+		$fieldgroup_topic->save();
+		
+		$fieldgroup_reply = new Fieldgroup(); 
+		$fieldgroup_reply->name = 'discussions-reply';
+		$fieldgroup_reply->add($this->fields->get('title')); 
+		$fieldgroup_reply->add($field_message);
+		$fieldgroup_reply->add($field_author);
+		$fieldgroup_reply->save();
+		
+		$template_forum = new Template();
+		$template_forum->name = 'discussions-forum';
+		$template_forum->fieldgroup = $fieldgroup_forum; 
+		$template_forum->slashUrls = 1; 
+		$template_forum->allowPageNum = 1; 
+		$template_forum->pageLabelField = 'title'; 
+		$template_forum = $template_forum->save();
+		
+		$template_topic = new Template();
+		$template_topic->name = 'discussions-topic';
+		$template_topic->fieldgroup = $fieldgroup_topic;
+		$template_topic->parentTemplates = array($template_forum->id);
+		$template_topic->slashUrls = 1; 
+		$template_topic->allowPageNum = 1; 
+		$template_topic->pageLabelField = 'title'; 
+		$template_topic = $template_topic->save();
+		
+		$template_reply = new Template();
+		$template_reply->name = 'discussions-reply';
+		$template_reply->fieldgroup = $fieldgroup_reply;
+		$template_reply->parentTemplates = array($template_topic->id);
+		$template_reply->slashUrls = 1; 
+		$template_reply->noChildren = 1; 
+		$template_reply->pageLabelField = 'discussions_message'; 
+		$template_reply->save();
+		
+		$template_forum->childTemplates = array($template_topic->id);
+		$template_forum->save();
+		
+		$template_topic->childTemplates = array($template_reply->id);
+		$template_topic->save();
+		
+	}
+	public function ___uninstall() {
+		$discussions_pages = wire('pages')->find('template=discussions-forum|discussions-topic|discussions-reply')->count();
+		if ($discussions_pages > 0)
+			throw new WireException("There are pages using discussions- templates. Remove those first before uninstall");
+		
+		$templates = wire('templates');
+		$templates->delete($templates->get('discussions-forum'));
+		$templates->delete($templates->get('discussions-topic'));
+		$templates->delete($templates->get('discussions-reply'));
+		
+		$fieldgroups = wire('fieldgroups');
+		$fields = wire('fields');
+		foreach ($fields->get('discussions_author')->getFieldgroups() as $fieldgroup) {
+			$fieldgroups->delete($fieldgroup);
+		}
+		foreach ($fields->get('discussions_pagination')->getFieldgroups() as $fieldgroup) {
+			$fieldgroups->delete($fieldgroup);
+		}
+		$fields->delete($fields->get('discussions_author'));
+		$fields->delete($fields->get('discussions_message'));
+		$fields->delete($fields->get('discussions_pagination'));
+	}
+	
+	private function _checkInstall() {
+		if($this->templates->get('discussions-forum'))
+                throw new WireException("There is already a template installed called 'discussions-forum'");
+						
+		if($this->templates->get('discussions-topic'))
+                throw new WireException("There is already a template installed called 'discussions-topic'");
+						
+		if($this->templates->get('discussions-reply'))
+                throw new WireException("There is already a template installed called 'discussions-reply'");
+
+		if($this->fields->get('discussions_author'))
+				throw new WireException("There is already a field installed called 'discussions_author'");
+				
+		if($this->fields->get('discussions_message'))
+				throw new WireException("There is already a field installed called 'discussions_message'");
+				
+		if($this->fields->get('discussions_pagination'))
+				throw new WireException("There is already a field installed called 'discussions_pagination'");
+		
+		return true;
+	}
+
+}
+
