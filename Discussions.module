@@ -195,6 +195,9 @@ class Discussions extends WireData implements Module {
 		$out .= "</div>";
 		$out .= "</form>";
 		
+		$session->remove('discussions_title');
+		$session->remove('discussions_message');
+		
 		return $out;
 	}
 	
