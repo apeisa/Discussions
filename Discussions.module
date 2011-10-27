@@ -69,14 +69,17 @@ class Discussions extends WireData implements Module {
 	
 	public function ___render() {
 		$page = wire('page');
-		
+		$out = "<div id='discussions'>";
 		if ($page->template->name == "discussions-forum") {
-			return $this->renderForum();
+			$out .= $this->renderForum();
 		}
 		
 		if ($page->template->name == "discussions-topic") {
-			return $this->renderTopic();
+			$out .= $this->renderTopic();
 		}
+		
+		$out .= "</div>";
+		return $out;
 	}
 	
 	public function ___renderForum() {
@@ -121,10 +124,9 @@ class Discussions extends WireData implements Module {
 	public function ___renderTopic($options = array()) {
 		
 		$page = wire('page');
-		$out = "<div id='discussions'>";
 		$limit = $page->parent->discussions_pagination;
 		$results = $page->children("template=discussions-reply, sort=created, limit=$limit");
-		
+		$out = '';
 		
 		
 		$pagination = $results->renderPager();
@@ -140,7 +142,6 @@ class Discussions extends WireData implements Module {
 		$out .= $pagination;
 		
 		$out .= $this->renderForm("reply");
-		$out .= "</div>";
 		
 		return $out;
 	}
@@ -171,7 +172,12 @@ class Discussions extends WireData implements Module {
 		$discussions_title = '';
 		$discussions_message = '';
 		
-		$out .= "<form action='./' method='post'>";
+		$out .= "<form class='discussions-form' action='./' method='post'>";
+		$out .= 	"<div class='discussions-information'>";
+		$out .= 	"<div class='discussions-author'>{$user->name}</div>";
+		$out .= "</div>";
+		
+		$out .= "<div class='discussions-message'>";
 		if ($type == "topic") {
 			if ($get->empty_title) {
 				$discussions_title = $sanitizer->text($session->discussions_title);
@@ -180,13 +186,13 @@ class Discussions extends WireData implements Module {
 			$out .= "<label for='discussions_title'>Subject</label><input type='text' id='discussions_title' name='discussions_title' value='$discussions_title' />";
 		}
 		
-		$out .= "<div>{$user->name}</div>";
 		if ($get->empty_message) {
 			$discussions_message = $sanitizer->textarea($session->discussions_message);
 			$discussions_message = filter_var($discussions_message,FILTER_SANITIZE_FULL_SPECIAL_CHARS);
 		}
 		$out .= "<label for='discussions_message'>Write message:</label><textarea cols='50' rows='8' name='discussions_message'>$discussions_message</textarea>";
 		$out .= "<br><input type='submit' name='discussions_submit' />";
+		$out .= "</div>";
 		$out .= "</form>";
 		
 		return $out;
