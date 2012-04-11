@@ -350,7 +350,7 @@ class Discussions extends WireData implements Module {
 		$template_reply->parentTemplates = array($template_topic->id);
 		$template_reply->slashUrls = 1; 
 		$template_reply->noChildren = 1; 
-		$template_reply->pageLabelField = 'discussions_message'; 
+		$template_reply->pageLabelField = 'title'; 
 		$template_reply->save();
 		
 		$template_forum->childTemplates = array($template_topic->id);
