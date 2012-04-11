@@ -234,7 +234,7 @@ class Discussions extends WireData implements Module {
 			$newPost->name = $sanitizer->pageName($post->discussions_title, true);
 		} else {
 			$newPost->template = wire('templates')->get('discussions-reply');
-			$newPost->title = $sanitizer->text($post->discussions_message);
+			$newPost->title = implode(' ',array_slice(explode(' ', $sanitizer->text($post->discussions_message)),0,8));
 			$newPost->name = md5(time() . $user->name);
 		}
 		
