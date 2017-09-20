@@ -1,4 +1,4 @@
-<?php
+<?php namespace ProcessWire;
 
 /**
  * ProcessWire Discussions module
@@ -232,9 +232,20 @@ class Discussions extends WireData implements Module {
 			$newPost->template = wire('templates')->get('discussions-topic');
 			$newPost->title = $sanitizer->text($post->discussions_title);
 			$newPost->name = $sanitizer->pageName($post->discussions_title, true);
+			// Make sure post name is unique (after http://processwire.com/talk/topic/18-how-do-i-import-lots-of-data-into-pages/page__view__findpost__p__36)
+			$name = $newPost->name;
+			$title = $newPost->title;
+			$n = 0;
+			while(count($page->children("name=$name")) > 0) {
+			$n++; 
+			$name = $newPost->name . '-' . $n; // i.e. sears-tower-1, sears-tower-2, etc.
+			$title = $newPost->title . ' ' .$n;
+			}
+			$newPost->name = $name;
+			$newPost->title = $title;
 		} else {
 			$newPost->template = wire('templates')->get('discussions-reply');
-			$newPost->title = $sanitizer->text($post->discussions_message);
+			$newPost->title = implode(' ',array_slice(explode(' ', $sanitizer->text($post->discussions_message)),0,8));
 			$newPost->name = md5(time() . $user->name);
 		}
 		
@@ -248,7 +259,7 @@ class Discussions extends WireData implements Module {
 		
 		// After saving new reply we redirect to prevent double posts
 		if ($post->discussions_title) {
-			$session->redirect("./" . $sanitizer->pageName($post->discussions_title, true));
+			$session->redirect("./" . $name);
 		} else {
 			// Redirect to last page there is
 			$pageNum = $this->_countLastPage($page);
@@ -350,7 +361,7 @@ class Discussions extends WireData implements Module {
 		$template_reply->parentTemplates = array($template_topic->id);
 		$template_reply->slashUrls = 1; 
 		$template_reply->noChildren = 1; 
-		$template_reply->pageLabelField = 'discussions_message'; 
+		$template_reply->pageLabelField = 'title'; 
 		$template_reply->save();
 		
 		$template_forum->childTemplates = array($template_topic->id);
